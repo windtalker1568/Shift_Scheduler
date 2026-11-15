@@ -27,7 +27,7 @@ export default function Auth({ onDone }: { onDone: () => void }) {
 
   return (
     <div className="grid min-h-screen place-items-center p-4">
-      <form onSubmit={submit} className="card w-full max-w-md space-y-5 p-6 sm:p-8">
+      <form onSubmit={submit} className="card auth-card w-full max-w-md space-y-5 p-6 sm:p-8">
         <div className="flex items-center gap-3">
           <div className="brand-mark grid h-12 w-12 place-items-center rounded-2xl text-xl font-bold text-white shadow-md" aria-hidden="true">D</div>
           <div>
