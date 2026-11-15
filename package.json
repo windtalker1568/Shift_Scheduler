@@ -1,0 +1,12 @@
+{
+  "name": "debenhams-scheduler",
+  "private": true,
+  "workspaces": ["server", "client"],
+  "scripts": {
+    "db": "docker compose up -d mongo",
+    "dev:server": "npm run dev -w server",
+    "dev:client": "npm run dev -w client",
+    "seed": "npm run seed -w server",
+    "test": "npm test -w server"
+  }
+}

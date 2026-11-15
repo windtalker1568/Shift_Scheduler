@@ -1,0 +1,67 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root { color-scheme: light; font-synthesis: none; text-rendering: optimizeLegibility; }
+  body {
+    @apply min-h-screen bg-paper font-sans text-ink antialiased;
+    font-variant-numeric: tabular-nums;
+    background-image: radial-gradient(ellipse at 10% 0%, rgba(36, 85, 122, 0.08), transparent 34rem);
+  }
+  h1, h2, h3 { @apply font-bold tracking-tight; }
+  button, input, select, textarea { font: inherit; }
+  button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+    outline: 3px solid rgba(36, 85, 122, 0.3);
+    outline-offset: 2px;
+  }
+}
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-lg border border-line bg-white px-3.5 py-2 text-sm font-bold text-ink shadow-sm transition;
+  }
+  .btn:hover { @apply border-slate-300 bg-slate-50 shadow; }
+  .btn:disabled { @apply cursor-not-allowed opacity-50 shadow-none; }
+  .btn-primary { @apply border-brand bg-brand text-white shadow-md; }
+  .btn-primary:hover { @apply border-brand-dark bg-brand-dark text-white; }
+  .btn-danger { @apply border-red-200 text-red-800; }
+  .btn-danger:hover { @apply border-red-300 bg-red-50; }
+  .input {
+    @apply rounded-lg border border-line bg-white px-3 py-2 text-sm text-ink shadow-sm transition;
+  }
+  .input::placeholder { @apply text-slate-400; }
+  .input:focus { @apply border-brand; }
+  .card { @apply rounded-2xl border border-white/80 bg-white shadow-[0_8px_30px_rgba(27,44,62,0.07)]; }
+  .th { @apply px-3 py-2.5 text-left text-xs font-bold uppercase tracking-wide text-muted; }
+  .td { @apply px-3 py-2.5 text-sm; }
+  .nav-link { @apply rounded-lg px-3 py-2 text-sm font-bold text-muted transition; }
+  .nav-link:hover { @apply bg-white text-ink; }
+  .nav-link-active { @apply bg-brand text-white shadow-sm; }
+  .nav-link-active:hover { @apply bg-brand-dark text-white; }
+}
+
+/* each requirement group has its own colour so the roster can be read at a glance */
+.grp-MIRAKL { background: #e7e3f7; color: #43348a; }
+.grp-EGAIN_DEB { background: #d6eded; color: #0b5555; }
+.grp-EGAIN_KM { background: #dcebd3; color: #2c5514; }
+.grp-SENT_DEB { background: #fbe8c4; color: #774605; }
+.grp-SENT_KM { background: #f8dbe3; color: #86203f; }
+.grp-none { background: #eef1f4; color: #3b4856; }
+
+.cov-BELOW_MIN { background: #f8d7d2; color: #8f2a1c; }
+.cov-BELOW_TARGET { background: #fdf0cf; color: #7a5410; }
+.cov-AT_TARGET { background: #d6eede; color: #1f6b44; }
+.cov-ABOVE_TARGET { background: #dbe9f8; color: #25598f; }
+.cov-ABOVE_MAX { background: #e8d5f0; color: #5f2278; outline: 2px solid #5f2278; outline-offset: -2px; }
+
+.cell { height: 36px; width: 100%; text-align: left; font-size: 12px; line-height: 1.15; padding: 2px 6px; border-left: 1px solid #e3e8ee; transition: filter 0.12s, box-shadow 0.12s; }
+.cell:hover { filter: saturate(1.15) brightness(0.98); }
+.cell:focus-visible { outline: 2px solid #24557a; outline-offset: -2px; }
+.cell-selected { box-shadow: inset 0 0 0 2px #24557a; }
+
+.brand-mark { background: linear-gradient(145deg, #326e96, #173c59); }
+.capacity-pill { @apply inline-flex items-center gap-2 rounded-full border border-line bg-white px-3 py-1.5 text-xs font-bold text-muted; }
+.capacity-dot { @apply h-2 w-2 rounded-full bg-emerald-500; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; }
+}
