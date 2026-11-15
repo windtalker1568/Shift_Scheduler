@@ -30,12 +30,16 @@ async function main() {
     const tid = new mongoose.Types.ObjectId();
     const lid = new mongoose.Types.ObjectId();
     teamDocs.push({ _id: tid, teamNumber: t.number, classification: t.cls, leaderPersonId: lid });
-    people.push({ _id: lid, employeeId: `E${1000 + ++n}`, name: nextName(), designation: 'TEAM_LEADER', teamId: tid });
+    const leaderNumber = ++n;
+    people.push({ _id: lid, emailAddress: `person${leaderNumber}@example.com`, name: nextName(), designation: 'TEAM_LEADER', teamId: tid });
     for (const [segment, count] of t.advisors)
-      for (let i = 0; i < count; i++) people.push({ employeeId: `E${1000 + ++n}`, name: nextName(), designation: 'ADVISOR', segment, teamId: tid });
+      for (let i = 0; i < count; i++) {
+        const personNumber = ++n;
+        people.push({ emailAddress: `person${personNumber}@example.com`, name: nextName(), designation: 'ADVISOR', segment, teamId: tid });
+      }
   }
   for (const d of ['QA', 'QA', 'TRAINER', 'MANAGEMENT'])
-    people.push({ employeeId: `E${1000 + ++n}`, name: nextName(), designation: d });
+    people.push({ emailAddress: `person${++n}@example.com`, name: nextName(), designation: d });
   await Team.insertMany(teamDocs);
   await Person.insertMany(people);
   await Settings.updateOne({ key: 'main' }, { $set: { setupComplete: true, activeCount: people.length } });

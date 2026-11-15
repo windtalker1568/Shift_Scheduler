@@ -33,6 +33,19 @@ export function parseCsv(text: string): Record<string, string>[] {
   });
 }
 
+/** Maps the people import's human-readable headers to the service fields. */
+export function parsePeopleCsv(text: string) {
+  return parseCsv(text).map((row) => ({
+    emailAddress: row.emailaddress ?? '',
+    name: row.fullname ?? row.name ?? '',
+    designation: row.designation ?? '',
+    teamLeader: row.teamleader ?? '',
+    segment: row.segment ?? '',
+    teamNumber: row.teamnumber ?? '',
+    classification: row.classification ?? '',
+  }));
+}
+
 export const csvCell = (v: unknown) => {
   const s = String(v ?? '');
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;

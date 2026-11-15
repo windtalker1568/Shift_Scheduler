@@ -2,7 +2,7 @@ import type { Classification, Designation, Group, Segment } from '../../shared/d
 
 export interface PersonDto {
   id: string;
-  employeeId: string;
+  emailAddress: string | null;
   name: string;
   designation: Designation;
   segment: Segment | null;

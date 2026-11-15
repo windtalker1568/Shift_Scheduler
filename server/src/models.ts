@@ -31,7 +31,7 @@ export const Settings = model(
 
 const personSchema = new Schema(
   {
-    employeeId: { type: String, required: true, unique: true, trim: true },
+    emailAddress: { type: String, unique: true, sparse: true, lowercase: true, trim: true },
     name: { type: String, required: true, trim: true },
     designation: { type: String, enum: DESIGNATIONS, required: true },
     segment: { type: String, enum: SEGMENTS },

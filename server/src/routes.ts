@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { ADVISOR_SHIFTS, CAPACITY, FIXED_SHIFT, GROUPS, isDateString, startOfWeek } from '../../shared/domain';
 import { config } from './config';
 import { HttpError } from './lib/errors';
-import { parseCsv } from './lib/csv';
+import { parsePeopleCsv } from './lib/csv';
 import { Settings, User, getSettings } from './models';
 import { weeklyCsv } from './services/export';
 import { changeClassification, completeSetup, importPeople, listPeople, listTeams, reassignAdvisors, removePerson, setupStatus, updatePerson } from './services/people';
@@ -90,8 +90,8 @@ router.post('/people', h(async (req, res) => {
 }));
 router.post('/people/import', h(async (req) => {
   const { csv } = z.object({ csv: z.string().min(1) }).parse(req.body);
-  const rows = parseCsv(csv);
-  if (!rows.length) throw new HttpError(400, 'Paste a header row (employeeId, name, designation, segment, teamNumber, classification) and at least one person');
+  const rows = parsePeopleCsv(csv);
+  if (!rows.length) throw new HttpError(400, 'Paste a header row with Full name, Designation, Team leader and E-mail Address, plus at least one person');
   return importPeople(rows, 2);
 }));
 router.put('/people/:id', h(async (req) => updatePerson(req.params.id, req.body)));

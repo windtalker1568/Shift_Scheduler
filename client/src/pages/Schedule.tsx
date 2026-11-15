@@ -60,7 +60,7 @@ export default function Schedule() {
   const rows = useMemo(() => {
     const q = f.q.toLowerCase();
     return (data?.people ?? [])
-      .filter((p) => (!f.designation || p.designation === f.designation) && (!f.teamId || p.teamId === f.teamId) && (!f.group || p.homeGroup === f.group) && (!q || p.name.toLowerCase().includes(q) || p.employeeId.toLowerCase().includes(q)))
+      .filter((p) => (!f.designation || p.designation === f.designation) && (!f.teamId || p.teamId === f.teamId) && (!f.group || p.homeGroup === f.group) && (!q || p.name.toLowerCase().includes(q) || (p.emailAddress ?? '').toLowerCase().includes(q)))
       .sort((a, b) => (a.teamNumber ?? 9999) - (b.teamNumber ?? 9999) || RANK[a.designation] - RANK[b.designation] || a.name.localeCompare(b.name));
   }, [data, f]);
 
@@ -84,7 +84,7 @@ export default function Schedule() {
 
       <section className="card p-3">
         <div className="mb-2 flex flex-wrap items-center gap-2">
-          <input className="input" placeholder="Search name or ID" aria-label="Search" value={f.q} onChange={(e) => setF({ ...f, q: e.target.value })} />
+          <input className="input" placeholder="Search name or email" aria-label="Search" value={f.q} onChange={(e) => setF({ ...f, q: e.target.value })} />
           <select className="input" aria-label="Designation" value={f.designation} onChange={(e) => setF({ ...f, designation: e.target.value })}>
             <option value="">All designations</option>
             {Object.entries(DESIGNATION_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
@@ -113,7 +113,7 @@ export default function Schedule() {
                 <div key={p.id} style={{ position: 'absolute', top: (first + i) * ROW_H, height: ROW_H, display: 'grid', gridTemplateColumns: COLS, width: TOTAL_W }} className="items-center border-b border-line">
                   <div className="truncate px-2 text-sm leading-tight">
                     <div className="truncate font-bold">{p.name}{warned.has(p.id) && <span title="Has a warning" className="ml-1 text-red-700">!</span>}</div>
-                    <div className="truncate text-xs text-muted">{p.employeeId} · {DESIGNATION_LABEL[p.designation]}{p.teamNumber ? ` · Team ${p.teamNumber}` : ''}{p.homeGroup ? ` · ${GROUP_LABEL[p.homeGroup]}` : ''}</div>
+                    <div className="truncate text-xs text-muted">{p.emailAddress ?? '–'} · {DESIGNATION_LABEL[p.designation]}{p.teamNumber ? ` · Team ${p.teamNumber}` : ''}{p.homeGroup ? ` · ${GROUP_LABEL[p.homeGroup]}` : ''}</div>
                   </div>
                   {data.dates.map((d) => (
                     <Cell key={d} person={p} date={d} entry={entryMap.get(`${p.id}|${d}`)} selected={selected?.personId === p.id && selected.date === d} onClick={() => setSelected({ personId: p.id, date: d })} />

@@ -15,6 +15,9 @@ import { HttpError } from '../lib/errors';
 import { Entry, Person, Settings, Team, toId } from '../models';
 
 const norm = (s: unknown) => String(s ?? '').trim().toUpperCase().replace(/[\s-]+/g, '_');
+const emailNorm = (s: unknown) => String(s ?? '').trim().toLowerCase();
+const nameKey = (s: unknown) => String(s ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+const validEmail = (s: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
 const ALIASES: Record<string, string> = {
   TL: 'TEAM_LEADER', TEAMLEADER: 'TEAM_LEADER', E_GAIN: 'EGAIN', SENTI: 'SENTIMENT', SENT: 'SENTIMENT',
   DEBENHAMS: 'NORMAL', DEB: 'NORMAL', KAREN_MILLAN: 'KAREN_MILLEN', KM: 'KAREN_MILLEN',
@@ -43,11 +46,12 @@ async function reserveSeats(n: number, session: mongoose.ClientSession) {
 }
 
 export interface RawRow {
-  employeeId?: unknown;
+  emailAddress?: unknown;
   name?: unknown;
   designation?: unknown;
   segment?: unknown;
   teamNumber?: unknown;
+  teamLeader?: unknown;
   teamId?: unknown;
   classification?: unknown;
 }
@@ -59,26 +63,42 @@ export async function importPeople(raw: RawRow[], rowOffset = 1) {
   const teamByNumber = new Map<number, { id: string; classification: Classification }>(
     teams.map((t: any) => [t.teamNumber, { id: String(t._id), classification: t.classification }]),
   );
-  const teamById = new Map(teams.map((t: any) => [String(t._id), { number: t.teamNumber as number, classification: t.classification as Classification }]));
-  const ids = raw.map((r) => String(r.employeeId ?? '').trim()).filter(Boolean);
-  const existing = new Set((await Person.find({ employeeId: { $in: ids } }).select('employeeId').lean()).map((p: any) => p.employeeId));
+  const teamById = new Map<string, { number: number; classification: Classification }>(
+    teams.map((t: any) => [String(t._id), { number: t.teamNumber, classification: t.classification }]),
+  );
+  const existingLeaders = await Person.find({ active: true, designation: 'TEAM_LEADER' }).select('name teamId').lean();
+  const teamNumbersByLeaderName = new Map<string, Set<number>>();
+  const addLeaderName = (name: unknown, teamNumber: number) => {
+    const key = nameKey(name);
+    if (!key) return;
+    const matches = teamNumbersByLeaderName.get(key) ?? new Set<number>();
+    matches.add(teamNumber);
+    teamNumbersByLeaderName.set(key, matches);
+  };
+  for (const leader of existingLeaders as any[]) {
+    const team = teamById.get(String(leader.teamId));
+    if (team) addLeaderName(leader.name, team.number);
+  }
+  const emails = raw.map((r) => emailNorm(r.emailAddress)).filter(Boolean);
+  const existing = new Set((await Person.find({ emailAddress: { $in: emails } }).select('emailAddress').lean()).map((p: any) => p.emailAddress));
   const seen = new Set<string>();
   const newTeams = new Map<number, Classification>();
 
-  type Parsed = { employeeId: string; name: string; designation: Designation; segment?: Segment; teamNumber?: number; existingTeamId?: string; classification?: Classification };
+  type Parsed = { emailAddress: string; name: string; designation: Designation; segment?: Segment; teamNumber?: number; existingTeamId?: string; classification?: Classification };
   const rows: Parsed[] = [];
   raw.forEach((r, i) => {
     const row = i + rowOffset;
     const err = (message: string) => errors.push({ row, message });
-    const employeeId = String(r.employeeId ?? '').trim();
+    const emailAddress = emailNorm(r.emailAddress);
     const name = String(r.name ?? '').trim();
     const designation = pick(DESIGNATIONS, r.designation);
-    if (!employeeId) return err('Employee ID is required');
-    if (existing.has(employeeId) || seen.has(employeeId)) return err(`Employee ID ${employeeId} is already used`);
-    seen.add(employeeId);
+    if (!emailAddress) return err('E-mail Address is required');
+    if (!validEmail(emailAddress)) return err(`"${emailAddress}" is not a valid E-mail Address`);
+    if (existing.has(emailAddress) || seen.has(emailAddress)) return err(`E-mail Address ${emailAddress} is already used`);
+    seen.add(emailAddress);
     if (!name) return err('Name is required');
     if (!designation) return err(`Unknown designation "${r.designation}"`);
-    const p: Parsed = { employeeId, name, designation };
+    const p: Parsed = { emailAddress, name, designation };
     if (designation === 'TEAM_LEADER') {
       const teamNumber = Number(r.teamNumber);
       const classification = pick(CLASSIFICATIONS, r.classification);
@@ -88,6 +108,7 @@ export async function importPeople(raw: RawRow[], rowOffset = 1) {
       newTeams.set(teamNumber, classification);
       p.teamNumber = teamNumber;
       p.classification = classification;
+      addLeaderName(name, teamNumber);
     } else if (designation === 'ADVISOR') {
       const segment = pick(SEGMENTS, r.segment);
       if (!segment) return err('Advisors need a segment (eGain, Sentiment or Mirakl)');
@@ -106,12 +127,27 @@ export async function importPeople(raw: RawRow[], rowOffset = 1) {
       const t = teamById.get(String(r.teamId));
       if (t) { p.existingTeamId = String(r.teamId); p.teamNumber = t.number; classification = t.classification; }
     } else {
-      const n = Number(r.teamNumber);
+      const leaderName = String(r.teamLeader ?? '').trim();
+      let n: number;
+      if (leaderName) {
+        const matches = teamNumbersByLeaderName.get(nameKey(leaderName));
+        if (!matches?.size) {
+          errors.push({ row, message: `Team leader "${leaderName}" was not found` });
+          continue;
+        }
+        if (matches.size > 1) {
+          errors.push({ row, message: `Team leader name "${leaderName}" is ambiguous` });
+          continue;
+        }
+        n = [...matches][0];
+      } else {
+        n = Number(r.teamNumber);
+      }
       p.teamNumber = n;
       classification = teamByNumber.get(n)?.classification ?? newTeams.get(n);
       if (teamByNumber.has(n)) p.existingTeamId = teamByNumber.get(n)!.id;
     }
-    if (!classification) { errors.push({ row, message: 'Advisors need an existing team (team number or team)' }); continue; }
+    if (!classification) { errors.push({ row, message: 'Advisors need a valid Team leader' }); continue; }
     const problem = ruleProblem(p.segment!, classification);
     if (problem) errors.push({ row, message: problem });
   }
@@ -127,10 +163,10 @@ export async function importPeople(raw: RawRow[], rowOffset = 1) {
       const pid = new mongoose.Types.ObjectId();
       teamIds.set(p.teamNumber!, tid);
       teamDocs.push({ _id: tid, teamNumber: p.teamNumber, classification: p.classification, leaderPersonId: pid });
-      personDocs.push({ _id: pid, employeeId: p.employeeId, name: p.name, designation: p.designation, teamId: tid });
+      personDocs.push({ _id: pid, emailAddress: p.emailAddress, name: p.name, designation: p.designation, teamId: tid });
     }
     for (const p of rows.filter((r) => r.designation !== 'TEAM_LEADER')) {
-      const doc: any = { employeeId: p.employeeId, name: p.name, designation: p.designation };
+      const doc: any = { emailAddress: p.emailAddress, name: p.name, designation: p.designation };
       if (p.designation === 'ADVISOR') {
         doc.segment = p.segment;
         doc.teamId = p.existingTeamId ? toId(p.existingTeamId) : teamIds.get(p.teamNumber!);
@@ -149,14 +185,14 @@ export async function listPeople(f: { active?: boolean; designation?: string; se
   if (f.designation) query.designation = f.designation;
   if (f.segment) query.segment = f.segment;
   if (f.teamId) query.teamId = toId(f.teamId);
-  if (f.q) query.$or = [{ name: new RegExp(escapeRe(f.q), 'i') }, { employeeId: new RegExp(escapeRe(f.q), 'i') }];
+  if (f.q) query.$or = [{ name: new RegExp(escapeRe(f.q), 'i') }, { emailAddress: new RegExp(escapeRe(f.q), 'i') }];
   const [people, teams] = await Promise.all([Person.find(query).sort({ name: 1 }).lean(), Team.find().lean()]);
   const byId = new Map(teams.map((t: any) => [String(t._id), t]));
   return people.map((p: any) => {
     const t: any = p.teamId ? byId.get(String(p.teamId)) : undefined;
     return {
       id: String(p._id),
-      employeeId: p.employeeId as string,
+      emailAddress: (p.emailAddress ?? null) as string | null,
       name: p.name as string,
       designation: p.designation as Designation,
       segment: (p.segment ?? null) as Segment | null,
@@ -169,11 +205,16 @@ export async function listPeople(f: { active?: boolean; designation?: string; se
   });
 }
 
-export async function updatePerson(id: string, patch: { name?: string; employeeId?: string; segment?: string; teamId?: string }) {
+export async function updatePerson(id: string, patch: { name?: string; emailAddress?: string; segment?: string; teamId?: string }) {
   const p: any = await Person.findById(id);
   if (!p || !p.active) throw new HttpError(404, 'Person not found');
   if (patch.name?.trim()) p.name = patch.name.trim();
-  if (patch.employeeId?.trim()) p.employeeId = patch.employeeId.trim();
+  if (patch.emailAddress !== undefined) {
+    const emailAddress = emailNorm(patch.emailAddress);
+    if (!validEmail(emailAddress)) throw new HttpError(400, 'Enter a valid E-mail Address');
+    if (await Person.exists({ _id: { $ne: p._id }, emailAddress })) throw new HttpError(409, 'That E-mail Address is already in use');
+    p.emailAddress = emailAddress;
+  }
   if (p.designation === 'ADVISOR') {
     const segment = patch.segment ? pick(SEGMENTS, patch.segment) : p.segment;
     if (!segment) throw new HttpError(400, 'Unknown segment');

@@ -39,6 +39,9 @@ Tests for the auto-scheduler and rules: `npm test`.
 A team leader's team number is the team name; each team leader has a classification: Mirakl, Karen Millen or Normal (= Debenhams).
 Mirakl advisors can only sit under Mirakl team leaders and Mirakl team leaders only have Mirakl advisors. Classification changes
 and moves that would break this are blocked until advisors are reassigned.
+Each person has a unique E-mail Address. For bulk import, use the headers `Full name`, `Designation`, `Team leader`,
+`E-mail Address`, `Segment`, `Team number` and `Classification`. Advisor rows identify their team leader by name; the
+importer resolves that name and assigns the leader's team number. Team Leader rows provide their own team number and classification.
 
 **Setup is one time.** The scheduler stays locked until you finish setup. After that you can add, edit and remove people.
 Removing a person is a soft delete: they leave the 500 count and future schedules, past rosters keep their name.
