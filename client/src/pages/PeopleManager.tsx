@@ -2,8 +2,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { ApiError, api } from '../api';
 import {
-  CLASSIFICATIONS, CLASSIFICATION_LABEL, DESIGNATIONS, DESIGNATION_LABEL, GROUP_LABEL, SEGMENTS, SEGMENT_LABEL,
-  type Classification, type Designation, type Segment,
+  CLASSIFICATIONS, CLASSIFICATION_LABEL, DESIGNATIONS, DESIGNATION_LABEL,
+  type Classification, type Designation,
 } from '../../../shared/domain';
 import type { PersonDto, TeamDto } from '../types';
 
@@ -14,23 +14,23 @@ function errText(e: unknown): string {
     return e.details.map((d: any) => (typeof d === 'string' ? d : `Row ${d.row}: ${d.message}`)).join('\n');
   return (e as Error).message;
 }
-const SAMPLE = 'Full name,Designation,Team leader,E-mail Address,Segment,Team number,Classification\nAsha Rao,Team Leader,,asha.rao@example.com,,12,Normal\nDev Nair,Advisor,Asha Rao,dev.nair@example.com,eGain,,\nMaya Iyer,QA,,maya.iyer@example.com,,,';
+const SAMPLE = 'Full name,Designation,Team leader,E-mail Address,Team number,Classification\nAsha Rao,Team Leader,,asha.rao@example.com,12,Normal\nDev Nair,Advisor,Asha Rao,dev.nair@example.com,,\nMaya Iyer,QA,,maya.iyer@example.com,,';
 
 export default function PeopleManager({ setupMode = false, onCompleted }: { setupMode?: boolean; onCompleted?: () => void }) {
   const qc = useQueryClient();
-  const [filters, setFilters] = useState({ q: '', designation: '', segment: '', teamId: '' });
+  const [filters, setFilters] = useState({ q: '', designation: '', teamId: '' });
   const query = new URLSearchParams(Object.entries(filters).filter(([, v]) => v) as [string, string][]).toString();
   const people = useQuery({ queryKey: ['people', filters], queryFn: () => api<PersonDto[]>('/people?' + query) });
   const everyone = useQuery({ queryKey: ['people', 'all'], queryFn: () => api<PersonDto[]>('/people') });
   const teams = useQuery({ queryKey: ['teams'], queryFn: () => api<TeamDto[]>('/teams') });
   const refresh = () => ['people', 'teams', 'setup', 'week'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
 
-  const [form, setForm] = useState({ emailAddress: '', name: '', designation: 'ADVISOR' as Designation, segment: 'EGAIN' as Segment, teamId: '', teamNumber: '', classification: 'NORMAL' as Classification });
+  const [form, setForm] = useState({ emailAddress: '', name: '', designation: 'ADVISOR' as Designation, teamId: '', teamNumber: '', classification: 'NORMAL' as Classification });
   const [formError, setFormError] = useState('');
   const add = useMutation({
     mutationFn: () => {
       const base = { emailAddress: form.emailAddress, name: form.name, designation: form.designation };
-      const body = form.designation === 'ADVISOR' ? { ...base, segment: form.segment, teamId: form.teamId }
+      const body = form.designation === 'ADVISOR' ? { ...base, teamId: form.teamId }
         : form.designation === 'TEAM_LEADER' ? { ...base, teamNumber: form.teamNumber, classification: form.classification } : base;
       return api('/people', { method: 'POST', body });
     },
@@ -82,19 +82,12 @@ export default function PeopleManager({ setupMode = false, onCompleted }: { setu
               </select>
             </label>
             {form.designation === 'ADVISOR' && (
-              <>
-                <label className="text-sm font-bold">Segment
-                  <select className="input mt-1 w-full" value={form.segment} onChange={(e) => setForm({ ...form, segment: e.target.value as Segment })}>
-                    {SEGMENTS.map((s) => <option key={s} value={s}>{SEGMENT_LABEL[s]}</option>)}
-                  </select>
-                </label>
-                <label className="text-sm font-bold sm:col-span-2">Team leader
-                  <select className="input mt-1 w-full" value={form.teamId} onChange={(e) => setForm({ ...form, teamId: e.target.value })}>
-                    <option value="">Choose a team</option>
-                    {teams.data?.map((t) => <option key={t.id} value={t.id}>{teamLabel(t)}{t.leaderName ? ` · ${t.leaderName}` : ''}</option>)}
-                  </select>
-                </label>
-              </>
+              <label className="text-sm font-bold sm:col-span-2">Team leader
+                <select className="input mt-1 w-full" value={form.teamId} onChange={(e) => setForm({ ...form, teamId: e.target.value })}>
+                  <option value="">Choose a team leader</option>
+                  {teams.data?.map((t) => <option key={t.id} value={t.id}>{teamLabel(t)}</option>)}
+                </select>
+              </label>
             )}
             {form.designation === 'TEAM_LEADER' && (
               <>
@@ -113,7 +106,7 @@ export default function PeopleManager({ setupMode = false, onCompleted }: { setu
 
         <section className="card space-y-3 p-4">
           <h2 className="text-lg">Add many at once</h2>
-          <p className="text-sm text-muted">Paste comma- or tab-separated rows with Full name, Designation, Team leader and E-mail Address. For advisors, enter the team leader's name; their team number is filled from that leader. Team leader rows need a Team number and Classification, and advisors need a Segment. Nothing is saved unless every row is valid.</p>
+          <p className="text-sm text-muted">Paste comma- or tab-separated rows with Full name, Designation, Team leader and E-mail Address. Advisor rows use the team leader's name; their team number is filled from that leader. Team leader rows need a Team number and Classification. Staffing needs determine advisor work. Nothing is saved unless every row is valid.</p>
           <textarea className="input h-32 w-full font-mono text-xs" placeholder={SAMPLE} value={csv} onChange={(e) => setCsv(e.target.value)} />
           {importMsg && <p role="status" className={`whitespace-pre-line text-sm ${importMsg.ok ? 'text-green-800' : 'text-red-700'}`}>{importMsg.text}</p>}
           <button className="btn btn-primary" disabled={!csv.trim() || doImport.isPending} onClick={() => { setImportMsg(null); doImport.mutate(); }}>Import people</button>
@@ -128,10 +121,6 @@ export default function PeopleManager({ setupMode = false, onCompleted }: { setu
             <option value="">All designations</option>
             {DESIGNATIONS.map((d) => <option key={d} value={d}>{DESIGNATION_LABEL[d]}</option>)}
           </select>
-          <select className="input" aria-label="Segment" value={filters.segment} onChange={(e) => setFilters({ ...filters, segment: e.target.value })}>
-            <option value="">All segments</option>
-            {SEGMENTS.map((s) => <option key={s} value={s}>{SEGMENT_LABEL[s]}</option>)}
-          </select>
           <select className="input" aria-label="Team" value={filters.teamId} onChange={(e) => setFilters({ ...filters, teamId: e.target.value })}>
             <option value="">All teams</option>
             {teams.data?.map((t) => <option key={t.id} value={t.id}>{teamLabel(t)}</option>)}
@@ -139,9 +128,9 @@ export default function PeopleManager({ setupMode = false, onCompleted }: { setu
         </div>
         <div className="max-h-[480px] overflow-auto">
           <table className="w-full border-collapse">
-            <thead className="sticky top-0 bg-white"><tr><th className="th">E-mail Address</th><th className="th">Name</th><th className="th">Designation</th><th className="th">Segment</th><th className="th">Team</th><th className="th">Group</th><th className="th" /></tr></thead>
+            <thead className="sticky top-0 bg-white"><tr><th className="th">E-mail Address</th><th className="th">Name</th><th className="th">Designation</th><th className="th">Team</th><th className="th">Classification</th><th className="th" /></tr></thead>
             <tbody>
-              {people.data?.map((p) => <PersonRow key={p.id + p.name + p.emailAddress + p.segment + p.teamId} p={p} teams={teams.data ?? []} onChanged={refresh} teamLabel={teamLabel} />)}
+              {people.data?.map((p) => <PersonRow key={p.id + p.name + p.emailAddress + p.teamId} p={p} teams={teams.data ?? []} onChanged={refresh} teamLabel={teamLabel} />)}
             </tbody>
           </table>
           {people.data?.length === 0 && <p className="p-3 text-sm text-muted">No one matches. Add people above or clear the filters.</p>}
@@ -165,11 +154,10 @@ function PersonRow({ p, teams, onChanged, teamLabel }: { p: PersonDto; teams: Te
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(p.name);
   const [emailAddress, setEmailAddress] = useState(p.emailAddress ?? '');
-  const [segment, setSegment] = useState<string>(p.segment ?? '');
   const [teamId, setTeamId] = useState(p.teamId ?? '');
   const [error, setError] = useState('');
   const save = useMutation({
-    mutationFn: () => api(`/people/${p.id}`, { method: 'PUT', body: { name, emailAddress, ...(p.designation === 'ADVISOR' ? { segment, teamId } : {}) } }),
+    mutationFn: () => api(`/people/${p.id}`, { method: 'PUT', body: { name, emailAddress, ...(p.designation === 'ADVISOR' ? { teamId } : {}) } }),
     onSuccess: () => { setEditing(false); setError(''); onChanged(); },
     onError: (e) => setError(errText(e)),
   });
@@ -185,12 +173,9 @@ function PersonRow({ p, teams, onChanged, teamLabel }: { p: PersonDto; teams: Te
         <td className="td">{editing ? <input className="input w-44" value={name} onChange={(e) => setName(e.target.value)} /> : p.name}</td>
         <td className="td">{DESIGNATION_LABEL[p.designation]}</td>
         <td className="td">{editing && p.designation === 'ADVISOR'
-          ? <select className="input" value={segment} onChange={(e) => setSegment(e.target.value)}>{SEGMENTS.map((s) => <option key={s} value={s}>{SEGMENT_LABEL[s]}</option>)}</select>
-          : p.segment ? SEGMENT_LABEL[p.segment] : '–'}</td>
-        <td className="td">{editing && p.designation === 'ADVISOR'
           ? <select className="input" value={teamId} onChange={(e) => setTeamId(e.target.value)}>{teams.map((t) => <option key={t.id} value={t.id}>{teamLabel(t)}</option>)}</select>
           : p.teamNumber ? `Team ${p.teamNumber}` : '–'}</td>
-        <td className="td">{p.homeGroup ? GROUP_LABEL[p.homeGroup] : '–'}</td>
+        <td className="td">{p.classification ? CLASSIFICATION_LABEL[p.classification] : '–'}</td>
         <td className="td whitespace-nowrap text-right">
           {editing ? (
             <>
@@ -205,7 +190,7 @@ function PersonRow({ p, teams, onChanged, teamLabel }: { p: PersonDto; teams: Te
           )}
         </td>
       </tr>
-      {error && <tr><td colSpan={7} className="px-2 pb-2 text-sm text-red-700" role="alert">{error}</td></tr>}
+      {error && <tr><td colSpan={6} className="px-2 pb-2 text-sm text-red-700" role="alert">{error}</td></tr>}
     </>
   );
 }

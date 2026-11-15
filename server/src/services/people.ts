@@ -3,12 +3,9 @@ import {
   CAPACITY,
   CLASSIFICATIONS,
   DESIGNATIONS,
-  SEGMENTS,
-  homeGroup,
   todayIST,
   type Classification,
   type Designation,
-  type Segment,
 } from '../../../shared/domain';
 import { withTx } from '../db';
 import { HttpError } from '../lib/errors';
@@ -19,7 +16,7 @@ const emailNorm = (s: unknown) => String(s ?? '').trim().toLowerCase();
 const nameKey = (s: unknown) => String(s ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
 const validEmail = (s: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
 const ALIASES: Record<string, string> = {
-  TL: 'TEAM_LEADER', TEAMLEADER: 'TEAM_LEADER', E_GAIN: 'EGAIN', SENTI: 'SENTIMENT', SENT: 'SENTIMENT',
+  TL: 'TEAM_LEADER', TEAMLEADER: 'TEAM_LEADER',
   DEBENHAMS: 'NORMAL', DEB: 'NORMAL', KAREN_MILLAN: 'KAREN_MILLEN', KM: 'KAREN_MILLEN',
 };
 function pick<T extends string>(list: readonly T[], v: unknown): T | undefined {
@@ -28,13 +25,6 @@ function pick<T extends string>(list: readonly T[], v: unknown): T | undefined {
   return (list as readonly string[]).includes(a) ? (a as T) : undefined;
 }
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
-export function ruleProblem(segment: Segment, classification: Classification): string | null {
-  if (homeGroup(segment, classification)) return null;
-  return segment === 'MIRAKL'
-    ? 'Mirakl advisors can only sit under Mirakl team leaders'
-    : 'Only Mirakl advisors can sit under a Mirakl team leader';
-}
 
 async function reserveSeats(n: number, session: mongoose.ClientSession) {
   const s = await Settings.findOneAndUpdate(
@@ -49,7 +39,6 @@ export interface RawRow {
   emailAddress?: unknown;
   name?: unknown;
   designation?: unknown;
-  segment?: unknown;
   teamNumber?: unknown;
   teamLeader?: unknown;
   teamId?: unknown;
@@ -84,7 +73,7 @@ export async function importPeople(raw: RawRow[], rowOffset = 1) {
   const seen = new Set<string>();
   const newTeams = new Map<number, Classification>();
 
-  type Parsed = { emailAddress: string; name: string; designation: Designation; segment?: Segment; teamNumber?: number; existingTeamId?: string; classification?: Classification };
+  type Parsed = { emailAddress: string; name: string; designation: Designation; teamNumber?: number; existingTeamId?: string; classification?: Classification };
   const rows: Parsed[] = [];
   raw.forEach((r, i) => {
     const row = i + rowOffset;
@@ -109,10 +98,6 @@ export async function importPeople(raw: RawRow[], rowOffset = 1) {
       p.teamNumber = teamNumber;
       p.classification = classification;
       addLeaderName(name, teamNumber);
-    } else if (designation === 'ADVISOR') {
-      const segment = pick(SEGMENTS, r.segment);
-      if (!segment) return err('Advisors need a segment (eGain, Sentiment or Mirakl)');
-      p.segment = segment;
     }
     rows.push(p);
     (p as any)._raw = r;
@@ -148,8 +133,6 @@ export async function importPeople(raw: RawRow[], rowOffset = 1) {
       if (teamByNumber.has(n)) p.existingTeamId = teamByNumber.get(n)!.id;
     }
     if (!classification) { errors.push({ row, message: 'Advisors need a valid Team leader' }); continue; }
-    const problem = ruleProblem(p.segment!, classification);
-    if (problem) errors.push({ row, message: problem });
   }
   if (errors.length) throw new HttpError(400, 'Some rows need fixing. Nothing was saved.', errors);
 
@@ -168,7 +151,6 @@ export async function importPeople(raw: RawRow[], rowOffset = 1) {
     for (const p of rows.filter((r) => r.designation !== 'TEAM_LEADER')) {
       const doc: any = { emailAddress: p.emailAddress, name: p.name, designation: p.designation };
       if (p.designation === 'ADVISOR') {
-        doc.segment = p.segment;
         doc.teamId = p.existingTeamId ? toId(p.existingTeamId) : teamIds.get(p.teamNumber!);
       }
       personDocs.push(doc);
@@ -179,11 +161,10 @@ export async function importPeople(raw: RawRow[], rowOffset = 1) {
   return { created: rows.length };
 }
 
-export async function listPeople(f: { active?: boolean; designation?: string; segment?: string; teamId?: string; q?: string } = {}) {
+export async function listPeople(f: { active?: boolean; designation?: string; teamId?: string; q?: string } = {}) {
   const query: any = {};
   if (f.active !== undefined) query.active = f.active;
   if (f.designation) query.designation = f.designation;
-  if (f.segment) query.segment = f.segment;
   if (f.teamId) query.teamId = toId(f.teamId);
   if (f.q) query.$or = [{ name: new RegExp(escapeRe(f.q), 'i') }, { emailAddress: new RegExp(escapeRe(f.q), 'i') }];
   const [people, teams] = await Promise.all([Person.find(query).sort({ name: 1 }).lean(), Team.find().lean()]);
@@ -195,17 +176,15 @@ export async function listPeople(f: { active?: boolean; designation?: string; se
       emailAddress: (p.emailAddress ?? null) as string | null,
       name: p.name as string,
       designation: p.designation as Designation,
-      segment: (p.segment ?? null) as Segment | null,
       active: p.active as boolean,
       teamId: t ? String(t._id) : null,
       teamNumber: (t?.teamNumber ?? null) as number | null,
       classification: (t?.classification ?? null) as Classification | null,
-      homeGroup: p.designation === 'ADVISOR' ? homeGroup(p.segment, t?.classification) : null,
     };
   });
 }
 
-export async function updatePerson(id: string, patch: { name?: string; emailAddress?: string; segment?: string; teamId?: string }) {
+export async function updatePerson(id: string, patch: { name?: string; emailAddress?: string; teamId?: string }) {
   const p: any = await Person.findById(id);
   if (!p || !p.active) throw new HttpError(404, 'Person not found');
   if (patch.name?.trim()) p.name = patch.name.trim();
@@ -216,16 +195,11 @@ export async function updatePerson(id: string, patch: { name?: string; emailAddr
     p.emailAddress = emailAddress;
   }
   if (p.designation === 'ADVISOR') {
-    const segment = patch.segment ? pick(SEGMENTS, patch.segment) : p.segment;
-    if (!segment) throw new HttpError(400, 'Unknown segment');
     const team: any = await Team.findById(patch.teamId ?? p.teamId);
-    if (!team) throw new HttpError(400, 'Choose a team');
-    const problem = ruleProblem(segment, team.classification);
-    if (problem) throw new HttpError(409, problem);
-    p.segment = segment;
+    if (!team) throw new HttpError(400, 'Choose a team leader');
     p.teamId = team._id;
-  } else if (patch.segment || patch.teamId) {
-    throw new HttpError(400, 'Only advisors have a segment and can be moved between teams');
+  } else if (patch.teamId) {
+    throw new HttpError(400, 'Only advisors can be moved between teams');
   }
   await p.save();
   return { ok: true };
@@ -272,10 +246,6 @@ export async function changeClassification(teamId: string, raw: unknown) {
   if (!classification) throw new HttpError(400, 'Unknown classification');
   const team: any = await Team.findById(teamId);
   if (!team) throw new HttpError(404, 'Team not found');
-  const advisors: any[] = await Person.find({ teamId: team._id, designation: 'ADVISOR', active: true }).lean();
-  const blocked = advisors.filter((a) => ruleProblem(a.segment, classification));
-  if (blocked.length)
-    throw new HttpError(409, `Move these advisors to a matching team leader first: ${blocked.map((a) => a.name).join(', ')}`);
   team.classification = classification;
   await team.save();
   return { ok: true };
@@ -286,8 +256,6 @@ export async function reassignAdvisors(personIds: string[], toTeamId: string) {
   if (!team) throw new HttpError(404, 'Team not found');
   const advisors: any[] = await Person.find({ _id: { $in: personIds.map(toId) }, designation: 'ADVISOR', active: true }).lean();
   if (advisors.length !== personIds.length) throw new HttpError(400, 'Only active advisors can be moved');
-  const blocked = advisors.filter((a) => ruleProblem(a.segment, team.classification));
-  if (blocked.length) throw new HttpError(409, `${ruleProblem(blocked[0].segment, team.classification)}: ${blocked.map((a) => a.name).join(', ')}`);
   await Person.updateMany({ _id: { $in: advisors.map((a) => a._id) } }, { $set: { teamId: team._id } });
   return { moved: advisors.length };
 }
@@ -302,10 +270,7 @@ export async function completeSetup() {
   const teams = await listTeams();
   const problems: string[] = [];
   if (!people.length) problems.push('Add your people first');
-  for (const p of people) {
-    if (p.designation === 'ADVISOR' && (!p.segment || !p.teamId)) problems.push(`${p.name}: needs a segment and a team leader`);
-    if (p.designation === 'ADVISOR' && p.segment && p.teamId && !p.homeGroup) problems.push(`${p.name}: segment does not match the team leader classification`);
-  }
+  for (const p of people) if (p.designation === 'ADVISOR' && !p.teamId) problems.push(`${p.name}: needs a team leader`);
   for (const t of teams) if (!t.leaderId) problems.push(`Team ${t.teamNumber} has no team leader`);
   if (problems.length) throw new HttpError(400, 'Setup is not ready to complete', problems);
   await Settings.updateOne({ key: 'main' }, { $set: { setupComplete: true } });

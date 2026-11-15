@@ -40,7 +40,6 @@ export function parsePeopleCsv(text: string) {
     name: row.fullname ?? row.name ?? '',
     designation: row.designation ?? '',
     teamLeader: row.teamleader ?? '',
-    segment: row.segment ?? '',
     teamNumber: row.teamnumber ?? '',
     classification: row.classification ?? '',
   }));

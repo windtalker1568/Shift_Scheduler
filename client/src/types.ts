@@ -1,16 +1,14 @@
-import type { Classification, Designation, Group, Segment } from '../../shared/domain';
+import type { Classification, Designation, Group } from '../../shared/domain';
 
 export interface PersonDto {
   id: string;
   emailAddress: string | null;
   name: string;
   designation: Designation;
-  segment: Segment | null;
   active: boolean;
   teamId: string | null;
   teamNumber: number | null;
   classification: Classification | null;
-  homeGroup: Group | null;
 }
 export interface TeamDto {
   id: string;
@@ -82,7 +80,7 @@ export interface GenerateResult {
     spareForTarget: number;
   }[];
   notes: string[];
-  stats: { crossSegment: number; leftover: number; surplus: number };
+  stats: { coverage: number; leftover: number; surplus: number };
 }
 export interface ReqRowDto {
   group: Group;

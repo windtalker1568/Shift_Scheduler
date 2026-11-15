@@ -1,6 +1,6 @@
 import mongoose, { type ClientSession } from 'mongoose';
 import { config } from './config';
-import { Person } from './models';
+import { Entry, Person } from './models';
 
 export async function connectDb() {
   await mongoose.connect(config.mongoUri);
@@ -9,8 +9,12 @@ export async function connectDb() {
   await Person.init();
   const people = db.collection('people');
   const indexes = await people.indexes();
-  const legacyIndex = indexes.find((index) => index.key.employeeId === 1);
-  if (legacyIndex?.name) await people.dropIndex(legacyIndex.name);
+  const legacyIndexes = indexes.filter((index) => index.key.employeeId === 1 || index.key.segment === 1);
+  for (const index of legacyIndexes) {
+    if (index.name) await people.dropIndex(index.name);
+  }
+  await people.updateMany({ segment: { $exists: true } }, { $unset: { segment: '' } });
+  await Entry.updateMany({ reason: 'CROSS_SEGMENT_NEED' }, { $set: { reason: 'COVERAGE_NEED' } });
 }
 
 /** Runs fn inside a MongoDB transaction (needs a replica set). */

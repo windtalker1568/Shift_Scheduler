@@ -35,30 +35,29 @@ Tests for the auto-scheduler and rules: `npm test`.
 
 ## How it works
 
-**People and teams.** Designations: Advisor, Team Leader, QA, Trainer, Management. Advisors have a segment (eGain, Sentiment, Mirakl).
-A team leader's team number is the team name; each team leader has a classification: Mirakl, Karen Millen or Normal (= Debenhams).
-Mirakl advisors can only sit under Mirakl team leaders and Mirakl team leaders only have Mirakl advisors. Classification changes
-and moves that would break this are blocked until advisors are reassigned.
-Each person has a unique E-mail Address. For bulk import, use the headers `Full name`, `Designation`, `Team leader`,
-`E-mail Address`, `Segment`, `Team number` and `Classification`. Advisor rows identify their team leader by name; the
+**People and teams.** Designations: Advisor, Team Leader, QA, Trainer, Management. A team leader's team number is the team name;
+each team leader has a classification: Mirakl, Karen Millen or Normal (= Debenhams). Mirakl teams only cover Mirakl work.
+Other advisors can cover any eGain or Sentiment group according to staffing needs, with their team's classification preferred
+when capacity allows. Each person has a unique E-mail Address. For bulk import, use the headers `Full name`, `Designation`,
+`Team leader`, `E-mail Address`, `Team number` and `Classification`. Advisor rows identify their team leader by name; the
 importer resolves that name and assigns the leader's team number. Team Leader rows provide their own team number and classification.
 
 **Setup is one time.** The scheduler stays locked until you finish setup. After that you can add, edit and remove people.
 Removing a person is a soft delete: they leave the 500 count and future schedules, past rosters keep their name.
 The 500 cap is enforced on the server with an atomic counter inside a transaction, including for CSV import.
 
-**Groups.** Home group = segment + team leader classification: Mirakl, eGain – Debenhams, eGain – Karen Millen,
-Sentiment – Debenhams, Sentiment – Karen Millen. Each schedule entry also records the *work group* for that day.
+**Groups.** Staffing needs are configured for Mirakl, eGain – Debenhams, eGain – Karen Millen, Sentiment – Debenhams
+and Sentiment – Karen Millen. Each schedule entry records the *work group* needed for that day.
 
 **Staffing needs.** For every group, shift and weekday you set a minimum, target and maximum (simple mode: one number = target).
 There is a default weekly template; any single week can have its own numbers. The two Debenhams groups default to no maximum.
 
 **Auto-scheduler** (server/src/lib/autoScheduler.ts), run as a preview first, then applied:
 1. Weekly days off are placed on the quietest days (default 2, consecutive where possible).
-2. Segment priority: advisors fill their own group's minimum first (Sentiment on Sentiment, eGain on eGain).
-3. Business need: a group still below minimum borrows from the other non-Mirakl segment. Mirakl never moves in or out.
+2. Advisors from non-Mirakl teams are shared across eGain and Sentiment staffing needs, preferring groups matching their team's classification.
+3. Mirakl teams only cover Mirakl needs.
 4. Groups are raised towards target.
-5. Leftover advisors go to the Debenhams group of their own segment, up to its maximum.
+5. Remaining non-Mirakl capacity can cover Debenhams groups up to their maximum.
 6. Anyone still unplaced is reported as surplus.
 Rest between shifts, working days in a row, and shift rotation look across week boundaries (a Sunday 22:00 shift blocks a Monday 07:00 start).
 Locked cells, leave and days off set by hand are never changed. Teams are kept on the same shift where possible.

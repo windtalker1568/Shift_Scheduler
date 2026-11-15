@@ -2,8 +2,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { ApiError, api, download } from '../api';
 import {
-  ADVISOR_SHIFTS, DESIGNATION_LABEL, FIXED_SHIFT, GROUPS, GROUP_LABEL, OT_OPTIONS, REASON_LABEL, WEEKDAY_SHORT,
-  rangeLabel, startOfWeek, todayIST, weekdayOf, type Group,
+  ADVISOR_SHIFTS, CLASSIFICATION_LABEL, DESIGNATION_LABEL, FIXED_SHIFT, GROUPS, GROUP_LABEL, OT_OPTIONS, REASON_LABEL, WEEKDAY_SHORT,
+  classificationAllowsGroup, groupsForClassification, rangeLabel, startOfWeek, todayIST, weekdayOf, type Group,
 } from '../../../shared/domain';
 import CoverageMatrix from '../components/CoverageMatrix';
 import WeekPicker from '../components/WeekPicker';
@@ -60,7 +60,7 @@ export default function Schedule() {
   const rows = useMemo(() => {
     const q = f.q.toLowerCase();
     return (data?.people ?? [])
-      .filter((p) => (!f.designation || p.designation === f.designation) && (!f.teamId || p.teamId === f.teamId) && (!f.group || p.homeGroup === f.group) && (!q || p.name.toLowerCase().includes(q) || (p.emailAddress ?? '').toLowerCase().includes(q)))
+      .filter((p) => (!f.designation || p.designation === f.designation) && (!f.teamId || p.teamId === f.teamId) && (!f.group || (p.designation === 'ADVISOR' && classificationAllowsGroup(p.classification, f.group as Group))) && (!q || p.name.toLowerCase().includes(q) || (p.emailAddress ?? '').toLowerCase().includes(q)))
       .sort((a, b) => (a.teamNumber ?? 9999) - (b.teamNumber ?? 9999) || RANK[a.designation] - RANK[b.designation] || a.name.localeCompare(b.name));
   }, [data, f]);
 
@@ -113,7 +113,7 @@ export default function Schedule() {
                 <div key={p.id} style={{ position: 'absolute', top: (first + i) * ROW_H, height: ROW_H, display: 'grid', gridTemplateColumns: COLS, width: TOTAL_W }} className="items-center border-b border-line">
                   <div className="truncate px-2 text-sm leading-tight">
                     <div className="truncate font-bold">{p.name}{warned.has(p.id) && <span title="Has a warning" className="ml-1 text-red-700">!</span>}</div>
-                    <div className="truncate text-xs text-muted">{p.emailAddress ?? '–'} · {DESIGNATION_LABEL[p.designation]}{p.teamNumber ? ` · Team ${p.teamNumber}` : ''}{p.homeGroup ? ` · ${GROUP_LABEL[p.homeGroup]}` : ''}</div>
+                    <div className="truncate text-xs text-muted">{p.emailAddress ?? '–'} · {DESIGNATION_LABEL[p.designation]}{p.teamNumber ? ` · Team ${p.teamNumber}` : ''}{p.classification ? ` · ${CLASSIFICATION_LABEL[p.classification]}` : ''}</div>
                   </div>
                   {data.dates.map((d) => (
                     <Cell key={d} person={p} date={d} entry={entryMap.get(`${p.id}|${d}`)} selected={selected?.personId === p.id && selected.date === d} onClick={() => setSelected({ personId: p.id, date: d })} />
@@ -160,9 +160,9 @@ function Cell({ person, date, entry, selected, onClick }: { person: PersonDto; d
   else if (entry?.type === 'SHIFT') {
     cls = entry.workGroup ? `grp-${entry.workGroup}` : 'grp-none';
     main = rangeLabel(date, entry.shiftCode!, entry.otHours);
-    const moved = person.designation === 'ADVISOR' && entry.workGroup && entry.workGroup !== person.homeGroup;
-    sub = [entry.otHours ? `+${entry.otHours}h OT` : '', entry.locked ? 'locked' : '', moved ? `on ${GROUP_LABEL[entry.workGroup!]}` : ''].filter(Boolean).join(' · ');
-    title = `${main}${entry.reason ? ` · ${REASON_LABEL[entry.reason as keyof typeof REASON_LABEL] ?? entry.reason}` : ''}${person.designation === 'TEAM_LEADER' ? ' · follows the team' : ''}`;
+    const assignedGroup = person.designation === 'ADVISOR' && entry.workGroup ? GROUP_LABEL[entry.workGroup] : '';
+    sub = [entry.otHours ? `+${entry.otHours}h OT` : '', entry.locked ? 'locked' : '', assignedGroup].filter(Boolean).join(' · ');
+    title = `${main}${assignedGroup ? ` · ${assignedGroup}` : ''}${entry.reason ? ` · ${REASON_LABEL[entry.reason as keyof typeof REASON_LABEL] ?? entry.reason}` : ''}${person.designation === 'TEAM_LEADER' ? ' · follows the team' : ''}`;
   }
   return (
     <button className={`cell ${cls} ${selected ? 'cell-selected' : ''}`} onClick={onClick} title={title} aria-label={`${person.name}, ${date}: ${main} ${sub}`}>
@@ -175,13 +175,13 @@ function Cell({ person, date, entry, selected, onClick }: { person: PersonDto; d
 function CellEditor({ person, date, entry, onClose, onSaved }: { person: PersonDto; date: string; entry?: EntryDto; onClose: () => void; onSaved: () => void }) {
   const isAdvisor = person.designation === 'ADVISOR';
   const isLeader = person.designation === 'TEAM_LEADER';
+  const groups = person.classification ? groupsForClassification(person.classification) : [];
   const [type, setType] = useState<string>(entry?.type ?? (isLeader ? 'OFF' : 'SHIFT'));
   const [shiftCode, setShiftCode] = useState(entry?.shiftCode ?? ADVISOR_SHIFTS[2].code);
   const [ot, setOt] = useState(entry?.otHours ?? 0);
-  const [workGroup, setWorkGroup] = useState<string>(entry?.workGroup ?? person.homeGroup ?? '');
+  const [workGroup, setWorkGroup] = useState<string>(entry?.workGroup ?? groups[0] ?? '');
   const [locked, setLocked] = useState(entry?.locked ?? false);
   const [error, setError] = useState('');
-  const groups = person.homeGroup === 'MIRAKL' ? (['MIRAKL'] as Group[]) : GROUPS.filter((g) => g !== 'MIRAKL');
   const done = { onSuccess: () => { setError(''); onSaved(); }, onError: (e: unknown) => setError(e instanceof ApiError ? e.message : (e as Error).message) };
   const save = useMutation({
     mutationFn: () => api('/schedule/entry', { method: 'PUT', body: { personId: person.id, date, type, ...(type === 'SHIFT' && isAdvisor ? { shiftCode, otHours: ot, workGroup: workGroup || undefined } : {}), locked } }),
@@ -218,7 +218,7 @@ function CellEditor({ person, date, entry, onClose, onSaved }: { person: PersonD
             </label>
             <label className="text-sm font-bold">Working in
               <select className="input mt-1 block" value={workGroup} onChange={(e) => setWorkGroup(e.target.value)}>
-                {groups.map((g) => <option key={g} value={g}>{GROUP_LABEL[g]}{g === person.homeGroup ? ' (own group)' : ''}</option>)}
+                {groups.map((g) => <option key={g} value={g}>{GROUP_LABEL[g]}</option>)}
               </select>
             </label>
           </>
@@ -238,7 +238,7 @@ function PreviewPanel({ result, dates, nameOf, applying, onApply, onDiscard }: {
     for (const i of items) m.set(i.personId, (m.get(i.personId) ?? 0) + 1);
     return [...m.entries()].map(([id, n]) => `${nameOf.get(id) ?? id}: ${n} day${n > 1 ? 's' : ''}`);
   };
-  const cross = tally(result.advisorEntries.filter((e) => e.reason === 'CROSS_SEGMENT_NEED'));
+  const cross = tally(result.advisorEntries.filter((e) => e.reason === 'COVERAGE_NEED'));
   const leftover = tally(result.advisorEntries.filter((e) => e.reason === 'LEFTOVER_TO_DEBENHAMS'));
   const surplus = tally(result.surplus);
   return (
@@ -250,7 +250,7 @@ function PreviewPanel({ result, dates, nameOf, applying, onApply, onDiscard }: {
         <span className="text-sm text-muted">Applying replaces every unlocked cell except leave and days off set by hand.</span>
       </div>
       <div className="flex flex-wrap gap-2 text-sm">
-        <span className="rounded bg-paper px-2 py-1">{result.stats.crossSegment} cross-segment days</span>
+        <span className="rounded bg-paper px-2 py-1">{result.stats.coverage} cross-classification days</span>
         <span className="rounded bg-paper px-2 py-1">{result.stats.leftover} leftover days moved to Debenhams</span>
         <span className="rounded bg-paper px-2 py-1">{result.stats.surplus} unplaced days</span>
         <span className="rounded bg-paper px-2 py-1">{result.shortfalls.length} cells below minimum</span>
@@ -260,7 +260,7 @@ function PreviewPanel({ result, dates, nameOf, applying, onApply, onDiscard }: {
       <div className="overflow-x-auto">
         <table className="w-full min-w-[640px] border-collapse text-sm">
           <caption className="pb-1 text-left font-bold">Can the team cover what is needed?</caption>
-          <thead><tr><th className="th">Group</th><th className="th">Advisors</th><th className="th">Person-days available</th><th className="th">Target needs</th><th className="th">More advisors for minimum</th><th className="th">More for target</th><th className="th">Spare</th></tr></thead>
+          <thead><tr><th className="th">Group</th><th className="th">Eligible advisors</th><th className="th">Potential person-days</th><th className="th">Target needs</th><th className="th">More advisors for minimum</th><th className="th">More for target</th><th className="th">Spare</th></tr></thead>
           <tbody>
             {result.feasibility.filter((r) => r.advisors > 0 || r.targetPersonDays > 0).map((r) => (
               <tr key={r.group} className="border-t border-line">
@@ -273,11 +273,12 @@ function PreviewPanel({ result, dates, nameOf, applying, onApply, onDiscard }: {
             ))}
           </tbody>
         </table>
+        <p className="mt-2 text-xs text-muted">Availability is shared across non-Mirakl groups, so advisor totals can overlap between groups.</p>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-2">
         <List title="Shortfalls" empty="Every minimum is met." items={result.shortfalls.slice(0, 30).map((s) => `${GROUP_LABEL[s.group]}, ${s.date}, ${s.shiftCode}: minimum ${s.min}, scheduled ${s.scheduled}. ${s.why}`)} />
-        <List title="Covering another segment (business need)" empty="None needed." items={cross.slice(0, 40)} />
+        <List title="Covering another team classification" empty="No crossover needed." items={cross.slice(0, 40)} />
         <List title="Leftover advisors moved to Debenhams" empty="None." items={leftover.slice(0, 40)} />
       </div>
       <List title="Surplus advisors (not placed)" empty="Everyone has a place." items={surplus.slice(0, 40)} />

@@ -5,11 +5,11 @@ import {
   HOUR,
   NIGHT_SHIFT_CODE,
   addDays,
-  debenhamsGroupFor,
+  classificationAllowsGroup,
   defaultReq,
   entryWindow,
   groupClassification,
-  groupSegment,
+  groupsForClassification,
   mostCommonShift,
   reqKey,
   shiftStartMs,
@@ -19,7 +19,7 @@ import {
   type Group,
   type Reason,
   type Req,
-  type Segment,
+  type Classification,
   type ShiftDef,
 } from '../../../shared/domain';
 import { computeCoverage, type CoverageCell } from './coverage';
@@ -27,8 +27,7 @@ import { computeCoverage, type CoverageCell } from './coverage';
 export interface SAdvisor {
   id: string;
   teamId: string;
-  segment: Segment;
-  home: Group;
+  classification: Classification;
 }
 export interface SEntry {
   personId: string;
@@ -49,7 +48,7 @@ export interface SchedulerSettings {
 export interface SchedulerHistory {
   lastWeekShift: Record<string, string>;
   nightsLastWeek: Set<string>;
-  crossCounts: Record<string, number>;
+  coverageCounts: Record<string, number>;
 }
 export interface SchedulerInput {
   dates: string[]; // the 7 days of the week
@@ -86,10 +85,11 @@ export interface AdvisorPlan {
   shortfalls: Shortfall[];
   feasibility: FeasibilityRow[];
   notes: string[];
-  stats: { crossSegment: number; leftover: number; surplus: number };
+  stats: { coverage: number; leftover: number; surplus: number };
 }
 
 const byTeamThenId = (a: SAdvisor, b: SAdvisor) => a.teamId.localeCompare(b.teamId) || a.id.localeCompare(b.id);
+const canCover = (advisor: SAdvisor, group: Group) => classificationAllowsGroup(advisor.classification, group);
 
 /** All ways to choose `k` of the given day indexes. */
 function combos(days: number[], k: number): number[][] {
@@ -102,7 +102,7 @@ const isBlock = (c: number[]) => c.every((v, i) => i === 0 || v === c[i - 1] + 1
 
 export function generateAdvisorWeek(inp: SchedulerInput): AdvisorPlan {
   const { dates, advisors, shifts, settings } = inp;
-  const hist = inp.history ?? { lastWeekShift: {}, nightsLastWeek: new Set<string>(), crossCounts: {} };
+  const hist = inp.history ?? { lastWeekShift: {}, nightsLastWeek: new Set<string>(), coverageCounts: {} };
   const minRestMs = settings.minRestHours * HOUR;
   const key = (pid: string, date: string) => `${pid}|${date}`;
   const reqOf = (g: Group, code: string, date: string): Req => inp.requirements[reqKey(g, code, weekdayOf(date))] ?? defaultReq(g);
@@ -140,67 +140,73 @@ export function generateAdvisorWeek(inp: SchedulerInput): AdvisorPlan {
   for (const e of inp.fixedEntries) {
     const a = advisorById.get(e.personId);
     const d = dates.indexOf(e.date);
-    if (a && d >= 0 && e.type === 'SHIFT' && e.shiftCode) register(a, e.shiftCode, d, e.workGroup ?? a.home);
+    if (a && d >= 0 && e.type === 'SHIFT' && e.shiftCode)
+      register(a, e.shiftCode, d, e.workGroup ?? groupsForClassification(a.classification)[0] ?? 'MIRAKL');
   }
 
   // ---------- 1. weekly days off, placed where demand is lowest ----------
   const offDays = new Map<string, Set<number>>();
+  const slackByGroup = new Map<Group, number[]>();
   for (const g of GROUPS) {
-    const advs = advisors.filter((a) => a.home === g).sort(byTeamThenId);
+    const advs = advisors.filter((a) => canCover(a, g));
     if (!advs.length) continue;
-    const slack = dates.map((date) => {
+    slackByGroup.set(g, dates.map((date) => {
       const supply = advs.filter((a) => !isFixedOff(a.id, date)).length;
       const demand = shifts.reduce((s, sh) => s + reqOf(g, sh.code, date).target, 0);
       return supply - demand;
-    });
-    for (const a of advs) {
-      const fixedOff = dates.filter((dt) => isFixedOff(a.id, dt)).length;
-      const need = Math.max(0, settings.weeklyOffDays - fixedOff);
-      const chosen = new Set<number>();
-      if (need > 0) {
-        const freeDays = dates.map((_, i) => i).filter((i) => !fixed.has(key(a.id, dates[i])));
-        let best: number[] | null = null;
-        let bestScore = -Infinity;
-        for (const c of combos(freeDays, need)) {
-          const off = new Set(c);
-          let run = 0;
-          let valid = true;
-          for (let i = -7; i < dates.length + 7; i++) {
-            const date = addDays(dates[0], i);
-            let working: boolean;
-            if (i >= 0 && i < dates.length) {
-              const fixedEntry = fixed.get(key(a.id, date));
-              working = fixedEntry ? fixedEntry.type === 'SHIFT' : !off.has(i);
-            } else {
-              working = outside.get(key(a.id, date))?.type === 'SHIFT';
-            }
-            run = working ? run + 1 : 0;
-            if (run > settings.maxConsecutiveWorkingDays) {
-              valid = false;
-              break;
-            }
+    }));
+  }
+  for (const a of [...advisors].sort(byTeamThenId)) {
+    const eligibleGroups = groupsForClassification(a.classification);
+    const slack = dates.map((_, i) => eligibleGroups.reduce((total, g) => total + (slackByGroup.get(g)?.[i] ?? 0), 0));
+    const fixedOff = dates.filter((dt) => isFixedOff(a.id, dt)).length;
+    const need = Math.max(0, settings.weeklyOffDays - fixedOff);
+    const chosen = new Set<number>();
+    if (need > 0) {
+      const freeDays = dates.map((_, i) => i).filter((i) => !fixed.has(key(a.id, dates[i])));
+      let best: number[] | null = null;
+      let bestScore = -Infinity;
+      for (const c of combos(freeDays, need)) {
+        const off = new Set(c);
+        let run = 0;
+        let valid = true;
+        for (let i = -7; i < dates.length + 7; i++) {
+          const date = addDays(dates[0], i);
+          let working: boolean;
+          if (i >= 0 && i < dates.length) {
+            const fixedEntry = fixed.get(key(a.id, date));
+            working = fixedEntry ? fixedEntry.type === 'SHIFT' : !off.has(i);
+          } else {
+            working = outside.get(key(a.id, date))?.type === 'SHIFT';
           }
-          if (!valid) continue;
-          const score = c.reduce((s, i) => s + slack[i], 0) + (isBlock(c) ? 1.5 : 0);
-          if (score > bestScore) {
-            bestScore = score;
-            best = c;
+          run = working ? run + 1 : 0;
+          if (run > settings.maxConsecutiveWorkingDays) {
+            valid = false;
+            break;
           }
         }
-        if (!best) best = [...freeDays].sort((x, y) => slack[y] - slack[x] || x - y).slice(0, need);
-        best.forEach((i) => {
-          chosen.add(i);
-          slack[i]--;
-        });
+        if (!valid) continue;
+        const score = c.reduce((s, i) => s + slack[i], 0) + (isBlock(c) ? 1.5 : 0);
+        if (score > bestScore) {
+          bestScore = score;
+          best = c;
+        }
       }
-      offDays.set(a.id, chosen);
+      if (!best) best = [...freeDays].sort((x, y) => slack[y] - slack[x] || x - y).slice(0, need);
+      best.forEach((i) => {
+        chosen.add(i);
+        for (const g of eligibleGroups) {
+          const groupSlack = slackByGroup.get(g);
+          if (groupSlack) groupSlack[i]--;
+        }
+      });
     }
+    offDays.set(a.id, chosen);
   }
 
   // ---------- 2. day by day: assign shift and work group ----------
   const surplus: { personId: string; date: string }[] = [];
-  const stats = { crossSegment: 0, leftover: 0, surplus: 0 };
-  const shiftByCode = new Map(shifts.map((s) => [s.code, s]));
+  const stats = { coverage: 0, leftover: 0, surplus: 0 };
 
   for (let d = 0; d < dates.length; d++) {
     const date = dates[d];
@@ -247,9 +253,12 @@ export function generateAdvisorWeek(inp: SchedulerInput): AdvisorPlan {
         shiftCode: sh.code,
         otHours: 0,
         workGroup: group,
-        reason: a.home === group ? 'HOME' : reason,
+        reason: reason === 'LEFTOVER_TO_DEBENHAMS'
+          ? reason
+          : a.classification === groupClassification(group) ? 'HOME' : 'COVERAGE_NEED',
         source: 'AUTO',
       });
+      if (reason !== 'LEFTOVER_TO_DEBENHAMS' && a.classification !== groupClassification(group)) stats.coverage++;
       register(a, sh.code, d, group);
       pool.delete(a.id);
     };
@@ -263,80 +272,56 @@ export function generateAdvisorWeek(inp: SchedulerInput): AdvisorPlan {
         }
       // most constrained cells first
       const room = (c: { g: Group; sh: ShiftDef; goal: number }) =>
-        [...pool.values()].filter((a) => a.home === c.g && feasible(a, c.sh)).length - (c.goal - cnt(c.g, c.sh.code, d));
+        [...pool.values()].filter((a) => canCover(a, c.g) && feasible(a, c.sh)).length - (c.goal - cnt(c.g, c.sh.code, d));
       return cells.map((c) => ({ c, r: room(c) })).sort((x, y) => x.r - y.r).map((x) => x.c);
     };
-    const fillHome = (level: 'min' | 'target') => {
+    const fillNeed = (level: 'min' | 'target') => {
       for (const c of cellsFor(level)) {
         while (c.goal - cnt(c.g, c.sh.code, d) > 0) {
           let best: SAdvisor | null = null;
           let bestCost = Infinity;
           for (const a of pool.values()) {
-            if (a.home !== c.g || !feasible(a, c.sh)) continue;
-            const k = cost(a, c.sh);
+            if (!canCover(a, c.g) || !feasible(a, c.sh)) continue;
+            const k = cost(a, c.sh) +
+              (a.classification === groupClassification(c.g) ? 0 : 4) +
+              3 * (hist.coverageCounts[a.id] ?? 0);
             if (k < bestCost || (k === bestCost && best && byTeamThenId(a, best) < 0)) {
               best = a;
               bestCost = k;
             }
           }
           if (!best) break;
-          assign(best, c.sh, c.g, 'HOME');
+          assign(best, c.sh, c.g, 'COVERAGE_NEED');
         }
       }
     };
-    const ownGap = (h: Group) =>
-      shifts.reduce((s, sh) => s + Math.max(0, reqOf(h, sh.code, date).target - cnt(h, sh.code, d)), 0);
 
-    // a) segment priority: fill every minimum with advisors from that group
-    fillHome('min');
+    // Fill every group's minimum and target from the shared eligible advisor pool.
+    fillNeed('min');
+    fillNeed('target');
 
-    // b) business need: groups still under their minimum borrow from the other non-Mirakl segment
-    for (const c of cellsFor('min')) {
-      if (c.g === 'MIRAKL') continue;
-      while (c.goal - cnt(c.g, c.sh.code, d) > 0) {
-        let best: SAdvisor | null = null;
-        let bestCost = Infinity;
-        for (const a of pool.values()) {
-          if (a.segment === 'MIRAKL' || a.segment === groupSegment(c.g) || !feasible(a, c.sh)) continue;
-          const k =
-            cost(a, c.sh) +
-            (groupClassification(a.home) === groupClassification(c.g) ? 0 : 2) +
-            3 * (hist.crossCounts[a.id] ?? 0) +
-            (ownGap(a.home) > 0 ? 6 : 0);
-          if (k < bestCost || (k === bestCost && best && byTeamThenId(a, best) < 0)) {
-            best = a;
-            bestCost = k;
-          }
-        }
-        if (!best) break;
-        assign(best, c.sh, c.g, 'CROSS_SEGMENT_NEED');
-        stats.crossSegment++;
-      }
-    }
-
-    // c) raise groups from minimum towards target
-    fillHome('target');
-
-    // d) leftover advisors go to the Debenhams group of their own segment (up to its maximum)
+    // Remaining non-Mirakl capacity can be used by Debenhams groups up to their maximums.
     for (const a of [...pool.values()].sort(byTeamThenId)) {
-      const tg = debenhamsGroupFor(a.segment);
-      if (!tg) continue; // Mirakl advisors are never moved
-      let best: ShiftDef | null = null;
+      if (a.classification === 'MIRAKL') continue;
+      let best: { group: Group; shift: ShiftDef } | null = null;
       let bestScore = Infinity;
-      for (const sh of shifts) {
-        if (!feasible(a, sh)) continue;
-        const r = reqOf(tg, sh.code, date);
-        const n = cnt(tg, sh.code, d);
-        if (r.max !== null && n >= r.max) continue;
-        const score = (n / Math.max(1, r.target)) * 10 + (r.target === 0 ? 20 : 0) + cost(a, sh);
-        if (score < bestScore) {
-          bestScore = score;
-          best = sh;
+      for (const group of ['EGAIN_DEB', 'SENT_DEB'] as const) {
+        for (const sh of shifts) {
+          if (!feasible(a, sh)) continue;
+          const r = reqOf(group, sh.code, date);
+          const n = cnt(group, sh.code, d);
+          if (r.max !== null && n >= r.max) continue;
+          const score = (n / Math.max(1, r.target)) * 10 + (r.target === 0 ? 20 : 0) +
+            cost(a, sh) + (a.classification === groupClassification(group) ? 0 : 2);
+          if (score < bestScore) {
+            bestScore = score;
+            best = { group, shift: sh };
+          }
         }
       }
       if (best) {
-        if (a.home !== tg) stats.leftover++;
-        assign(a, best, tg, 'LEFTOVER_TO_DEBENHAMS');
+        stats.leftover++;
+        assign(a, best.shift, best.group, 'LEFTOVER_TO_DEBENHAMS');
       }
     }
 
@@ -359,35 +344,38 @@ export function generateAdvisorWeek(inp: SchedulerInput): AdvisorPlan {
 
   const shiftEntries = [...plan.values(), ...inp.fixedEntries]
     .filter((e) => e.type === 'SHIFT')
-    .map((e) => ({ ...e, workGroup: e.workGroup ?? advisorById.get(e.personId)?.home }));
+    .map((e) => {
+      const advisor = advisorById.get(e.personId);
+      return { ...e, workGroup: e.workGroup ?? (advisor ? groupsForClassification(advisor.classification)[0] : undefined) };
+    });
   const coverage = computeCoverage(inp.requirements, shiftEntries, dates, shifts);
 
   const shortfalls: Shortfall[] = coverage
     .filter((c) => c.status === 'BELOW_MIN')
     .map((c) => {
-      const home = advisors.filter((a) => a.home === c.group);
+      const eligible = advisors.filter((a) => canCover(a, c.group));
       let off = 0;
       let elsewhere = 0;
-      for (const a of home) {
+      for (const a of eligible) {
         const e = entryAt(a.id, c.date);
         if (!e || e.type !== 'SHIFT') {
           if (isFixedOff(a.id, c.date) || offDays.get(a.id)?.has(dates.indexOf(c.date))) off++;
-        } else if (e.shiftCode !== c.shiftCode || (e.workGroup ?? a.home) !== c.group) elsewhere++;
+        } else if (e.shiftCode !== c.shiftCode || (e.workGroup ?? groupsForClassification(a.classification)[0]) !== c.group) elsewhere++;
       }
-      const blocked = surplus.filter((s) => s.date === c.date && advisorById.get(s.personId)?.home === c.group).length;
+      const blocked = surplus.filter((s) => s.date === c.date && advisorById.get(s.personId) && canCover(advisorById.get(s.personId)!, c.group)).length;
       return {
         group: c.group,
         date: c.date,
         shiftCode: c.shiftCode,
         min: c.min,
         scheduled: c.scheduled,
-        why: `${home.length} ${GROUP_LABEL[c.group]} advisors: ${off} off/leave, ${elsewhere} working other shifts or groups, ${blocked} blocked by rest rules`,
+        why: `${eligible.length} eligible advisors: ${off} off/leave, ${elsewhere} working other shifts or groups, ${blocked} blocked by rest rules`,
       };
     });
 
   const perAdvisor = dates.length - settings.weeklyOffDays || 1;
   const feasibility: FeasibilityRow[] = GROUPS.map((g) => {
-    const advs = advisors.filter((a) => a.home === g);
+    const advs = advisors.filter((a) => canCover(a, g));
     let available = 0;
     for (const a of advs) available += dates.length - Math.max(settings.weeklyOffDays, dates.filter((dt) => isFixedOff(a.id, dt)).length);
     let minPD = 0;
@@ -411,11 +399,10 @@ export function generateAdvisorWeek(inp: SchedulerInput): AdvisorPlan {
   });
 
   const notes: string[] = [];
-  if (stats.crossSegment) notes.push(`${stats.crossSegment} cross-segment assignments were needed to reach minimums.`);
+  if (stats.coverage) notes.push(`${stats.coverage} assignments crossed team classifications to meet staffing needs.`);
   if (stats.leftover) notes.push(`${stats.leftover} leftover advisor-days were moved onto Debenhams eGain/Sentiment work.`);
   if (stats.surplus) notes.push(`${stats.surplus} advisor-days could not be placed (surplus Mirakl advisors, group maximums, or rest rules).`);
   if (shortfalls.length) notes.push(`${shortfalls.length} group/shift/day cells are below their minimum.`);
-  void shiftByCode;
   return { entries, surplus, coverage, shortfalls, feasibility, notes, stats };
 }
 

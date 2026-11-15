@@ -77,7 +77,7 @@ export default function Requirements() {
         <h2 className="text-lg">Staffing needs</h2>
         <p className="max-w-3xl text-sm text-muted">
           Enter how many advisors each group needs on each shift and day. <b>Target</b> is the number you want, <b>minimum</b> must be met, and <b>maximum</b> is never exceeded.
-          The two Debenhams groups have no maximum by default, so advisors left over after every group is covered are placed there, in their own segment.
+          The two Debenhams groups have no maximum by default, so available non-Mirakl advisors can cover extra demand there. Mirakl teams remain separate.
         </p>
         <div className="flex flex-wrap items-center gap-4">
           <fieldset className="flex gap-3 text-sm">

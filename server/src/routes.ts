@@ -78,7 +78,6 @@ router.get('/people', h(async (req) => {
   return listPeople({
     active: q.active === undefined ? true : q.active === 'true',
     designation: q.designation as string | undefined,
-    segment: q.segment as string | undefined,
     teamId: q.teamId as string | undefined,
     q: q.q as string | undefined,
   });

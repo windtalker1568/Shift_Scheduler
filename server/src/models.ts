@@ -1,5 +1,5 @@
 import mongoose, { Schema, model, type ClientSession } from 'mongoose';
-import { CLASSIFICATIONS, DESIGNATIONS, GROUPS, SEGMENTS } from '../../shared/domain';
+import { CLASSIFICATIONS, DESIGNATIONS, GROUPS } from '../../shared/domain';
 
 const oid = Schema.Types.ObjectId;
 
@@ -34,14 +34,13 @@ const personSchema = new Schema(
     emailAddress: { type: String, unique: true, sparse: true, lowercase: true, trim: true },
     name: { type: String, required: true, trim: true },
     designation: { type: String, enum: DESIGNATIONS, required: true },
-    segment: { type: String, enum: SEGMENTS },
     teamId: { type: oid, ref: 'Team' },
     active: { type: Boolean, default: true },
     leftOn: { type: String },
   },
   { timestamps: true },
 );
-personSchema.index({ designation: 1, segment: 1, teamId: 1, active: 1 });
+personSchema.index({ designation: 1, teamId: 1, active: 1 });
 export const Person = model('Person', personSchema);
 
 export const Team = model(
@@ -63,7 +62,7 @@ const entrySchema = new Schema(
     locked: { type: Boolean, default: false },
     source: { type: String, enum: ['AUTO', 'MANUAL', 'DERIVED'], default: 'MANUAL' },
     workGroup: { type: String, enum: GROUPS },
-    reason: { type: String, enum: ['HOME', 'LEFTOVER_TO_DEBENHAMS', 'CROSS_SEGMENT_NEED', 'MANUAL'] },
+    reason: { type: String, enum: ['HOME', 'LEFTOVER_TO_DEBENHAMS', 'COVERAGE_NEED', 'MANUAL'] },
   },
   { timestamps: true },
 );

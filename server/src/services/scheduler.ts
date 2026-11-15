@@ -1,7 +1,6 @@
 import {
   ADVISOR_SHIFTS,
   addDays,
-  homeGroup,
   mostCommonShift,
   weekDatesOf,
   NIGHT_SHIFT_CODE,
@@ -39,9 +38,9 @@ export async function runGenerate(weekStart: string) {
   const skipped: string[] = [];
   for (const p of people as any[]) {
     if (p.designation !== 'ADVISOR') continue;
-    const home = homeGroup(p.segment, teamById.get(String(p.teamId))?.classification);
-    if (!home) skipped.push(p.name);
-    else advisors.push({ id: String(p._id), teamId: String(p.teamId), segment: p.segment, home });
+    const classification = teamById.get(String(p.teamId))?.classification;
+    if (!classification) skipped.push(p.name);
+    else advisors.push({ id: String(p._id), teamId: String(p.teamId), classification });
   }
   const leaders = (people as any[]).filter((p) => p.designation === 'TEAM_LEADER' && p.teamId).map((p) => ({ leaderId: String(p._id), teamId: String(p.teamId) }));
   const peopleIds = (people as any[]).map((p) => p._id);
@@ -60,10 +59,10 @@ export async function runGenerate(weekStart: string) {
   const lastWeek = new Set(weekDatesOf(addDays(weekStart, -7)));
   const lastShifts = new Map<string, string[]>();
   const nightsLastWeek = new Set<string>();
-  const crossCounts: Record<string, number> = {};
+  const coverageCounts: Record<string, number> = {};
   for (const e of neighbour) {
     if (e.date >= weekStart) continue;
-    if (e.reason === 'CROSS_SEGMENT_NEED') crossCounts[e.personId] = (crossCounts[e.personId] ?? 0) + 1;
+    if (e.reason === 'COVERAGE_NEED') coverageCounts[e.personId] = (coverageCounts[e.personId] ?? 0) + 1;
     if (e.type === 'SHIFT' && e.shiftCode && lastWeek.has(e.date)) {
       lastShifts.set(e.personId, [...(lastShifts.get(e.personId) ?? []), e.shiftCode]);
       if (e.shiftCode === NIGHT_SHIFT_CODE) nightsLastWeek.add(e.personId);
@@ -80,7 +79,7 @@ export async function runGenerate(weekStart: string) {
     fixedEntries: fixedAdvisor,
     neighbourEntries: neighbour,
     settings,
-    history: { lastWeekShift, nightsLastWeek, crossCounts },
+    history: { lastWeekShift, nightsLastWeek, coverageCounts },
   });
   const teamOf = new Map(advisors.map((a) => [a.id, a.teamId]));
   const leaderEntries = deriveLeaderEntries({
@@ -92,7 +91,7 @@ export async function runGenerate(weekStart: string) {
     weeklyOffDays: settings.weeklyOffDays,
   });
   const notes = [...plan.notes];
-  if (skipped.length) notes.push(`Skipped advisors with no valid team/segment: ${skipped.join(', ')}`);
+  if (skipped.length) notes.push(`Skipped advisors without a valid team classification: ${skipped.join(', ')}`);
   return { weekStart, advisorEntries: plan.entries, leaderEntries, coverage: plan.coverage, shortfalls: plan.shortfalls, surplus: plan.surplus, feasibility: plan.feasibility, notes, stats: plan.stats };
 }
 

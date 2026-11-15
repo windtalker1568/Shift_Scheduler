@@ -5,7 +5,8 @@ import {
   FIXED_SHIFT,
   GROUPS,
   addDays,
-  homeGroup,
+  classificationAllowsGroup,
+  groupsForClassification,
   isDateString,
   isValidOt,
   mostCommonShift,
@@ -102,10 +103,11 @@ export async function setEntry(raw: unknown) {
       const ot = b.otHours ?? 0;
       if (!isValidOt(ot)) throw new HttpError(400, 'Overtime must be between 0.5 and 5 hours, in 0.5-hour steps');
       const team: any = person.teamId ? await Team.findById(person.teamId).lean() : null;
-      const home = homeGroup(person.segment, team?.classification);
-      const wg = b.workGroup ?? home;
-      if (!wg || !home) throw new HttpError(409, 'This advisor has no valid team and segment');
-      if ((wg === 'MIRAKL') !== (home === 'MIRAKL')) throw new HttpError(409, 'Mirakl advisors only work in the Mirakl group, and nobody else can');
+      if (!team) throw new HttpError(409, 'This advisor needs a team leader before scheduling');
+      const wg = b.workGroup ?? groupsForClassification(team.classification)[0];
+      if (!wg) throw new HttpError(409, 'This advisor has no valid team classification');
+      if (!classificationAllowsGroup(team.classification, wg))
+        throw new HttpError(409, 'Mirakl teams only cover Mirakl; other teams can cover eGain and Sentiment needs');
       Object.assign(set, { shiftCode: b.shiftCode, otHours: ot, workGroup: wg, reason: 'MANUAL' });
     }
   } else {

@@ -13,10 +13,6 @@ export const DESIGNATION_LABEL: Record<Designation, string> = {
 };
 export const FIXED_DESIGNATIONS: Designation[] = ['QA', 'TRAINER', 'MANAGEMENT'];
 
-export const SEGMENTS = ['EGAIN', 'SENTIMENT', 'MIRAKL'] as const;
-export type Segment = (typeof SEGMENTS)[number];
-export const SEGMENT_LABEL: Record<Segment, string> = { EGAIN: 'eGain', SENTIMENT: 'Sentiment', MIRAKL: 'Mirakl' };
-
 export const CLASSIFICATIONS = ['MIRAKL', 'KAREN_MILLEN', 'NORMAL'] as const;
 export type Classification = (typeof CLASSIFICATIONS)[number];
 export const CLASSIFICATION_LABEL: Record<Classification, string> = {
@@ -37,11 +33,11 @@ export const GROUP_LABEL: Record<Group, string> = {
 
 export type EntryType = 'SHIFT' | 'OFF' | 'LEAVE';
 export type EntrySource = 'AUTO' | 'MANUAL' | 'DERIVED';
-export type Reason = 'HOME' | 'LEFTOVER_TO_DEBENHAMS' | 'CROSS_SEGMENT_NEED' | 'MANUAL';
+export type Reason = 'HOME' | 'LEFTOVER_TO_DEBENHAMS' | 'COVERAGE_NEED' | 'MANUAL';
 export const REASON_LABEL: Record<Reason, string> = {
-  HOME: 'Own group',
+  HOME: 'Team classification match',
   LEFTOVER_TO_DEBENHAMS: 'Leftover moved to Debenhams',
-  CROSS_SEGMENT_NEED: 'Cross-segment (business need)',
+  COVERAGE_NEED: 'Staffing need across classifications',
   MANUAL: 'Set manually',
 };
 
@@ -73,19 +69,17 @@ export const isValidOt = (h: number) =>
   Number.isFinite(h) && h >= 0 && h <= OT_MAX && Math.abs(h / OT_STEP - Math.round(h / OT_STEP)) < 1e-9;
 
 // ---------- groups ----------
-/** Home group = segment + team leader classification. Returns null for an invalid combination. */
-export function homeGroup(segment?: Segment | null, classification?: Classification | null): Group | null {
-  if (!segment || !classification) return null;
-  if (segment === 'MIRAKL') return classification === 'MIRAKL' ? 'MIRAKL' : null;
-  if (classification === 'MIRAKL') return null;
-  if (segment === 'EGAIN') return classification === 'NORMAL' ? 'EGAIN_DEB' : 'EGAIN_KM';
-  return classification === 'NORMAL' ? 'SENT_DEB' : 'SENT_KM';
+/** Mirakl stays isolated; other teams can cover any eGain or Sentiment need. */
+export function groupsForClassification(classification?: Classification | null): Group[] {
+  if (classification === 'MIRAKL') return ['MIRAKL'];
+  if (!classification) return [];
+  return ['EGAIN_DEB', 'EGAIN_KM', 'SENT_DEB', 'SENT_KM'];
 }
-export const groupSegment = (g: Group): Segment => (g === 'MIRAKL' ? 'MIRAKL' : g.startsWith('EGAIN') ? 'EGAIN' : 'SENTIMENT');
+export const classificationAllowsGroup = (classification: Classification | null | undefined, group: Group) =>
+  classification === 'MIRAKL' ? group === 'MIRAKL' : !!classification && group !== 'MIRAKL';
 export const groupClassification = (g: Group): Classification =>
   g === 'MIRAKL' ? 'MIRAKL' : g.endsWith('_KM') ? 'KAREN_MILLEN' : 'NORMAL';
 export const isDebenhamsGroup = (g: Group) => g === 'EGAIN_DEB' || g === 'SENT_DEB';
-export const debenhamsGroupFor = (s: Segment): Group | null => (s === 'EGAIN' ? 'EGAIN_DEB' : s === 'SENTIMENT' ? 'SENT_DEB' : null);
 
 // ---------- requirements ----------
 export interface Req {
